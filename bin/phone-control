@@ -101,9 +101,30 @@ pid_alive() {
   kill -0 "$1" >/dev/null 2>&1
 }
 
+set_device_stay_awake() {
+  local value="$1"
+  adb shell svc power stayon "$value" >/dev/null 2>&1 || true
+}
+
+has_screen_off_session() {
+  local file
+  file="$(sessions_file)"
+  [ -f "$file" ] || return 1
+
+  while IFS=$'\t' read -r id pid mode device started log_path; do
+    [ -n "${id:-}" ] || continue
+    if [ "$mode" = "screen-off" ]; then
+      return 0
+    fi
+  done < "$file"
+
+  return 1
+}
+
 cleanup_sessions() {
   ensure_state
   local file tmp
+  local removed_screen_off=0
   file="$(sessions_file)"
   tmp="${file}.tmp"
 
@@ -112,9 +133,15 @@ cleanup_sessions() {
     [ -n "${id:-}" ] || continue
     if pid_alive "$pid"; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$pid" "$mode" "$device" "$started" "$log_path" >> "$tmp"
+    elif [ "$mode" = "screen-off" ]; then
+      removed_screen_off=1
     fi
   done < "$file"
   mv "$tmp" "$file"
+
+  if [ "$removed_screen_off" -eq 1 ] && ! has_screen_off_session; then
+    set_device_stay_awake false
+  fi
 }
 
 find_session() {
@@ -218,7 +245,7 @@ mirror_off() {
   need_scrcpy
   require_device
 
-  local args=(--turn-screen-off --stay-awake)
+  local args=(--turn-screen-off --stay-awake --disable-screensaver)
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --no-audio) args+=(--no-audio) ;;
@@ -228,7 +255,9 @@ mirror_off() {
     shift
   done
 
-  exec scrcpy "${args[@]}"
+  set_device_stay_awake true
+  trap 'set_device_stay_awake false' EXIT
+  scrcpy "${args[@]}"
 }
 
 start_session() {
@@ -242,7 +271,7 @@ start_session() {
     case "$1" in
       --screen-off|--turn-screen-off)
         mode="screen-off"
-        args+=(--turn-screen-off --stay-awake)
+        args+=(--turn-screen-off --stay-awake --disable-screensaver)
         ;;
       --no-audio) args+=(--no-audio) ;;
       --stay-awake) args+=(--stay-awake) ;;
@@ -258,11 +287,18 @@ start_session() {
   started="$(date '+%Y-%m-%d %H:%M:%S')"
   log_path="$(logs_dir)/${id}.log"
 
+  if [ "$mode" = "screen-off" ]; then
+    set_device_stay_awake true
+  fi
+
   nohup scrcpy "${args[@]}" > "$log_path" 2>&1 < /dev/null &
   pid="$!"
 
   sleep 0.3
   if ! pid_alive "$pid"; then
+    if [ "$mode" = "screen-off" ]; then
+      set_device_stay_awake false
+    fi
     printf 'scrcpy exited immediately. Log:\n' >&2
     sed -n '1,120p' "$log_path" >&2
     exit 1
@@ -273,7 +309,7 @@ start_session() {
 }
 
 start_off_session() {
-  start_session --screen-off --stay-awake "$@"
+  start_session --screen-off "$@"
 }
 
 list_sessions() {
@@ -303,6 +339,9 @@ stop_session() {
   fi
 
   remove_session "$id"
+  if [ "$mode" = "screen-off" ] && ! has_screen_off_session; then
+    set_device_stay_awake false
+  fi
   printf 'stopped session %s pid=%s\n' "$id" "$pid"
 }
 
@@ -310,15 +349,22 @@ stop_all_sessions() {
   cleanup_sessions
 
   local stopped=0
+  local stopped_screen_off=0
   while IFS=$'\t' read -r id pid mode device started log_path; do
     [ -n "${id:-}" ] || continue
     if pid_alive "$pid"; then
       kill "$pid"
       stopped=$((stopped + 1))
+      if [ "$mode" = "screen-off" ]; then
+        stopped_screen_off=1
+      fi
     fi
   done < "$(sessions_file)"
 
   : > "$(sessions_file)"
+  if [ "$stopped_screen_off" -eq 1 ]; then
+    set_device_stay_awake false
+  fi
   printf 'stopped %s session(s)\n' "$stopped"
 }
 
