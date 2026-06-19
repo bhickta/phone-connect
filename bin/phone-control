@@ -67,6 +67,10 @@ logs_dir() {
   printf '%s/logs\n' "$(state_dir)"
 }
 
+screen_timeout_file() {
+  printf '%s/original-screen-timeout\n' "$(state_dir)"
+}
+
 ensure_state() {
   mkdir -p "$(state_dir)" "$(logs_dir)"
   touch "$(sessions_file)"
@@ -106,6 +110,34 @@ set_device_stay_awake() {
   adb shell svc power stayon "$value" >/dev/null 2>&1 || true
 }
 
+enable_screen_off_mode() {
+  ensure_state
+
+  if [ ! -f "$(screen_timeout_file)" ]; then
+    adb shell settings get system screen_off_timeout > "$(screen_timeout_file)"
+  fi
+
+  set_device_stay_awake true
+  adb shell settings put system screen_off_timeout 2147483647
+}
+
+disable_screen_off_mode() {
+  local timeout_file original_timeout
+  timeout_file="$(screen_timeout_file)"
+
+  set_device_stay_awake false
+
+  if [ -f "$timeout_file" ]; then
+    original_timeout="$(tr -d '\r\n' < "$timeout_file")"
+    if [ -n "$original_timeout" ] && [ "$original_timeout" != "null" ]; then
+      adb shell settings put system screen_off_timeout "$original_timeout" >/dev/null 2>&1 || true
+    else
+      adb shell settings delete system screen_off_timeout >/dev/null 2>&1 || true
+    fi
+    rm -f "$timeout_file"
+  fi
+}
+
 has_screen_off_session() {
   local file
   file="$(sessions_file)"
@@ -140,7 +172,7 @@ cleanup_sessions() {
   mv "$tmp" "$file"
 
   if [ "$removed_screen_off" -eq 1 ] && ! has_screen_off_session; then
-    set_device_stay_awake false
+    disable_screen_off_mode
   fi
 }
 
@@ -255,8 +287,8 @@ mirror_off() {
     shift
   done
 
-  set_device_stay_awake true
-  trap 'set_device_stay_awake false' EXIT
+  enable_screen_off_mode
+  trap 'disable_screen_off_mode' EXIT
   scrcpy "${args[@]}"
 }
 
@@ -288,7 +320,7 @@ start_session() {
   log_path="$(logs_dir)/${id}.log"
 
   if [ "$mode" = "screen-off" ]; then
-    set_device_stay_awake true
+    enable_screen_off_mode
   fi
 
   nohup scrcpy "${args[@]}" > "$log_path" 2>&1 < /dev/null &
@@ -297,7 +329,7 @@ start_session() {
   sleep 0.3
   if ! pid_alive "$pid"; then
     if [ "$mode" = "screen-off" ]; then
-      set_device_stay_awake false
+      disable_screen_off_mode
     fi
     printf 'scrcpy exited immediately. Log:\n' >&2
     sed -n '1,120p' "$log_path" >&2
@@ -340,7 +372,7 @@ stop_session() {
 
   remove_session "$id"
   if [ "$mode" = "screen-off" ] && ! has_screen_off_session; then
-    set_device_stay_awake false
+    disable_screen_off_mode
   fi
   printf 'stopped session %s pid=%s\n' "$id" "$pid"
 }
@@ -362,8 +394,8 @@ stop_all_sessions() {
   done < "$(sessions_file)"
 
   : > "$(sessions_file)"
-  if [ "$stopped_screen_off" -eq 1 ]; then
-    set_device_stay_awake false
+  if [ "$stopped_screen_off" -eq 1 ] || [ -f "$(screen_timeout_file)" ]; then
+    disable_screen_off_mode
   fi
   printf 'stopped %s session(s)\n' "$stopped"
 }

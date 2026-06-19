@@ -116,7 +116,7 @@ phone-control mirror-off
 
 This starts `scrcpy` with `--turn-screen-off --stay-awake --disable-screensaver`, so the phone display turns off while the mirrored window on the PC stays usable.
 
-The app also enables Android's ADB stay-awake mode for screen-off sessions. This prevents the phone from sleeping after the normal screen timeout while you are controlling it from the PC.
+The app also enables Android's ADB stay-awake mode and temporarily raises Android's screen timeout for screen-off sessions. The original timeout is restored when the last screen-off session ends.
 
 To disable audio too:
 
@@ -144,7 +144,7 @@ phone-control logs SESSION_ID_OR_PID
 
 Session metadata and logs are stored under `~/.local/state/phone-control`.
 
-`start-off` enables stay-awake mode before launching `scrcpy` and disables it again when the last screen-off session is stopped.
+`start-off` preserves the phone's existing screen timeout, prevents logical sleep while `scrcpy` is running, and restores the original timeout when the last screen-off session is stopped.
 
 ## File Transfer
 
