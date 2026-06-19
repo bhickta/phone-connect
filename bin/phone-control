@@ -11,6 +11,7 @@ Usage:
   phone-control doctor
   phone-control devices
   phone-control mirror [--no-audio] [--stay-awake] [--turn-screen-off]
+  phone-control mirror-off [--no-audio]
   phone-control wireless-pair HOST:PAIR_PORT PAIR_CODE
   phone-control wireless-connect HOST:ADB_PORT
   phone-control screenshot [OUT.png]
@@ -29,6 +30,7 @@ Common key names:
 Examples:
   phone-control doctor
   phone-control mirror --stay-awake
+  phone-control mirror-off
   phone-control wireless-pair 192.168.1.25:37123 123456
   phone-control wireless-connect 192.168.1.25:5555
   phone-control screenshot ~/Pictures/phone.png
@@ -126,6 +128,23 @@ mirror() {
   exec scrcpy "${args[@]}"
 }
 
+mirror_off() {
+  need_scrcpy
+  require_device
+
+  local args=(--turn-screen-off --stay-awake)
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-audio) args+=(--no-audio) ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown mirror-off option: $1" ;;
+    esac
+    shift
+  done
+
+  exec scrcpy "${args[@]}"
+}
+
 screenshot() {
   require_device
   local out="${1:-phone-screenshot-$(date +%Y%m%d-%H%M%S).png}"
@@ -164,6 +183,7 @@ main() {
     doctor) shift; doctor "$@" ;;
     devices) shift; need_adb; adb devices -l "$@" ;;
     mirror) shift; mirror "$@" ;;
+    mirror-off) shift; mirror_off "$@" ;;
     wireless-pair)
       shift
       need_adb

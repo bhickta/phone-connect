@@ -5,6 +5,7 @@ Control an Android phone from this PC with a small wrapper around `adb` and `scr
 ## What It Does
 
 - Mirror and control the phone screen from the PC.
+- Mirror and control while the phone's physical screen is off.
 - Pair/connect over wireless debugging.
 - Take screenshots and screen recordings.
 - Push/pull files.
@@ -46,6 +47,7 @@ Or run it directly:
 ```bash
 phone-control devices
 phone-control mirror
+phone-control mirror-off
 phone-control mirror --stay-awake --turn-screen-off
 phone-control screenshot ~/Pictures/phone.png
 phone-control record ~/Videos/phone.mp4
@@ -72,6 +74,22 @@ phone-control mirror
 ```
 
 The pair port and ADB port are different. Android shows both in the Wireless debugging screen.
+
+## Control With Phone Screen Off
+
+After the phone is connected through USB or wireless ADB:
+
+```bash
+phone-control mirror-off
+```
+
+This starts `scrcpy` with `--turn-screen-off --stay-awake`, so the phone display turns off while the mirrored window on the PC stays usable.
+
+To disable audio too:
+
+```bash
+phone-control mirror-off --no-audio
+```
 
 ## File Transfer
 
