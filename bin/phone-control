@@ -12,6 +12,12 @@ Usage:
   phone-control devices
   phone-control mirror [--no-audio] [--stay-awake] [--turn-screen-off]
   phone-control mirror-off [--no-audio]
+  phone-control start [--screen-off] [--no-audio] [--stay-awake]
+  phone-control start-off [--no-audio]
+  phone-control sessions
+  phone-control stop SESSION_ID_OR_PID
+  phone-control stop-all
+  phone-control logs SESSION_ID_OR_PID
   phone-control wireless-pair HOST:PAIR_PORT PAIR_CODE
   phone-control wireless-connect HOST:ADB_PORT
   phone-control screenshot [OUT.png]
@@ -31,6 +37,9 @@ Examples:
   phone-control doctor
   phone-control mirror --stay-awake
   phone-control mirror-off
+  phone-control start-off
+  phone-control sessions
+  phone-control stop phone-20260619-120000
   phone-control wireless-pair 192.168.1.25:37123 123456
   phone-control wireless-connect 192.168.1.25:5555
   phone-control screenshot ~/Pictures/phone.png
@@ -40,6 +49,27 @@ USAGE
 die() {
   printf '%s: %s\n' "$APP_NAME" "$*" >&2
   exit 1
+}
+
+state_dir() {
+  if [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s/phone-control\n' "$XDG_STATE_HOME"
+  else
+    printf '%s/.local/state/phone-control\n' "$HOME"
+  fi
+}
+
+sessions_file() {
+  printf '%s/sessions.tsv\n' "$(state_dir)"
+}
+
+logs_dir() {
+  printf '%s/logs\n' "$(state_dir)"
+}
+
+ensure_state() {
+  mkdir -p "$(state_dir)" "$(logs_dir)"
+  touch "$(sessions_file)"
 }
 
 need_cmd() {
@@ -61,6 +91,62 @@ require_device() {
   if [ "$count" -eq 0 ]; then
     die "no authorized Android device found. Enable USB debugging, connect USB, and accept the phone prompt."
   fi
+}
+
+current_device() {
+  adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }'
+}
+
+pid_alive() {
+  kill -0 "$1" >/dev/null 2>&1
+}
+
+cleanup_sessions() {
+  ensure_state
+  local file tmp
+  file="$(sessions_file)"
+  tmp="${file}.tmp"
+
+  : > "$tmp"
+  while IFS=$'\t' read -r id pid mode device started log_path; do
+    [ -n "${id:-}" ] || continue
+    if pid_alive "$pid"; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$pid" "$mode" "$device" "$started" "$log_path" >> "$tmp"
+    fi
+  done < "$file"
+  mv "$tmp" "$file"
+}
+
+find_session() {
+  local wanted="$1"
+  cleanup_sessions
+
+  while IFS=$'\t' read -r id pid mode device started log_path; do
+    [ -n "${id:-}" ] || continue
+    if [ "$wanted" = "$id" ] || [ "$wanted" = "$pid" ]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$pid" "$mode" "$device" "$started" "$log_path"
+      return 0
+    fi
+  done < "$(sessions_file)"
+
+  return 1
+}
+
+remove_session() {
+  local wanted="$1"
+  local file tmp
+  file="$(sessions_file)"
+  tmp="${file}.tmp"
+
+  : > "$tmp"
+  while IFS=$'\t' read -r id pid mode device started log_path; do
+    [ -n "${id:-}" ] || continue
+    if [ "$wanted" = "$id" ] || [ "$wanted" = "$pid" ]; then
+      continue
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$pid" "$mode" "$device" "$started" "$log_path" >> "$tmp"
+  done < "$file"
+  mv "$tmp" "$file"
 }
 
 keycode() {
@@ -145,6 +231,107 @@ mirror_off() {
   exec scrcpy "${args[@]}"
 }
 
+start_session() {
+  need_scrcpy
+  require_device
+  ensure_state
+
+  local mode="normal"
+  local args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --screen-off|--turn-screen-off)
+        mode="screen-off"
+        args+=(--turn-screen-off --stay-awake)
+        ;;
+      --no-audio) args+=(--no-audio) ;;
+      --stay-awake) args+=(--stay-awake) ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown start option: $1" ;;
+    esac
+    shift
+  done
+
+  local id device started log_path pid
+  id="phone-$(date +%Y%m%d-%H%M%S)"
+  device="$(current_device)"
+  started="$(date '+%Y-%m-%d %H:%M:%S')"
+  log_path="$(logs_dir)/${id}.log"
+
+  nohup scrcpy "${args[@]}" > "$log_path" 2>&1 < /dev/null &
+  pid="$!"
+
+  sleep 0.3
+  if ! pid_alive "$pid"; then
+    printf 'scrcpy exited immediately. Log:\n' >&2
+    sed -n '1,120p' "$log_path" >&2
+    exit 1
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$pid" "$mode" "$device" "$started" "$log_path" >> "$(sessions_file)"
+  printf 'started session %s pid=%s mode=%s device=%s\n' "$id" "$pid" "$mode" "$device"
+}
+
+start_off_session() {
+  start_session --screen-off --stay-awake "$@"
+}
+
+list_sessions() {
+  cleanup_sessions
+
+  if [ ! -s "$(sessions_file)" ]; then
+    printf 'no active phone-control sessions\n'
+    return 0
+  fi
+
+  printf '%-22s %-8s %-11s %-22s %s\n' "SESSION" "PID" "MODE" "DEVICE" "STARTED"
+  while IFS=$'\t' read -r id pid mode device started log_path; do
+    [ -n "${id:-}" ] || continue
+    printf '%-22s %-8s %-11s %-22s %s\n' "$id" "$pid" "$mode" "$device" "$started"
+  done < "$(sessions_file)"
+}
+
+stop_session() {
+  [ "$#" -eq 1 ] || die "usage: phone-control stop SESSION_ID_OR_PID"
+
+  local row id pid mode device started log_path
+  row="$(find_session "$1")" || die "session not found: $1"
+  IFS=$'\t' read -r id pid mode device started log_path <<< "$row"
+
+  if pid_alive "$pid"; then
+    kill "$pid"
+  fi
+
+  remove_session "$id"
+  printf 'stopped session %s pid=%s\n' "$id" "$pid"
+}
+
+stop_all_sessions() {
+  cleanup_sessions
+
+  local stopped=0
+  while IFS=$'\t' read -r id pid mode device started log_path; do
+    [ -n "${id:-}" ] || continue
+    if pid_alive "$pid"; then
+      kill "$pid"
+      stopped=$((stopped + 1))
+    fi
+  done < "$(sessions_file)"
+
+  : > "$(sessions_file)"
+  printf 'stopped %s session(s)\n' "$stopped"
+}
+
+show_logs() {
+  [ "$#" -eq 1 ] || die "usage: phone-control logs SESSION_ID_OR_PID"
+
+  local row id pid mode device started log_path
+  row="$(find_session "$1")" || die "session not found: $1"
+  IFS=$'\t' read -r id pid mode device started log_path <<< "$row"
+
+  sed -n '1,200p' "$log_path"
+}
+
 screenshot() {
   require_device
   local out="${1:-phone-screenshot-$(date +%Y%m%d-%H%M%S).png}"
@@ -184,6 +371,12 @@ main() {
     devices) shift; need_adb; adb devices -l "$@" ;;
     mirror) shift; mirror "$@" ;;
     mirror-off) shift; mirror_off "$@" ;;
+    start) shift; start_session "$@" ;;
+    start-off) shift; start_off_session "$@" ;;
+    sessions) shift; list_sessions "$@" ;;
+    stop) shift; stop_session "$@" ;;
+    stop-all) shift; stop_all_sessions "$@" ;;
+    logs) shift; show_logs "$@" ;;
     wireless-pair)
       shift
       need_adb

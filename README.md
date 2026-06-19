@@ -42,12 +42,43 @@ Or run it directly:
 ./bin/phone-control doctor
 ```
 
+The installer also creates two desktop launchers:
+
+- `Phone Control`
+- `Phone Control Screen Off`
+
+They start `scrcpy` in the background, so no terminal needs to stay open.
+
+## Install On Another PC
+
+Copy or clone this repository on the other Linux PC, then run:
+
+```bash
+sudo apt update
+sudo apt install android-tools-adb scrcpy
+cd android-phone-control
+./install.sh
+phone-control doctor
+```
+
+After pairing or connecting the phone:
+
+```bash
+phone-control start-off
+phone-control sessions
+```
+
 ## Common Commands
 
 ```bash
 phone-control devices
 phone-control mirror
 phone-control mirror-off
+phone-control start
+phone-control start-off
+phone-control sessions
+phone-control stop SESSION_ID_OR_PID
+phone-control stop-all
 phone-control mirror --stay-awake --turn-screen-off
 phone-control screenshot ~/Pictures/phone.png
 phone-control record ~/Videos/phone.mp4
@@ -90,6 +121,26 @@ To disable audio too:
 ```bash
 phone-control mirror-off --no-audio
 ```
+
+## Background Sessions
+
+Use `start` when you want the terminal to return immediately:
+
+```bash
+phone-control start
+phone-control start-off
+```
+
+Manage active sessions:
+
+```bash
+phone-control sessions
+phone-control stop SESSION_ID_OR_PID
+phone-control stop-all
+phone-control logs SESSION_ID_OR_PID
+```
+
+Session metadata and logs are stored under `~/.local/state/phone-control`.
 
 ## File Transfer
 
