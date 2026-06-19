@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="phone-control"
+
+usage() {
+  cat <<'USAGE'
+phone-control: control an Android phone from this PC using adb and scrcpy
+
+Usage:
+  phone-control doctor
+  phone-control devices
+  phone-control mirror [--no-audio] [--stay-awake] [--turn-screen-off]
+  phone-control wireless-pair HOST:PAIR_PORT PAIR_CODE
+  phone-control wireless-connect HOST:ADB_PORT
+  phone-control screenshot [OUT.png]
+  phone-control record [OUT.mp4]
+  phone-control install APK
+  phone-control push SRC PHONE_DEST
+  phone-control pull PHONE_SRC DEST
+  phone-control apps
+  phone-control open PACKAGE
+  phone-control key KEYCODE_OR_NAME
+  phone-control shell -- COMMAND...
+
+Common key names:
+  home back recent power volume-up volume-down enter
+
+Examples:
+  phone-control doctor
+  phone-control mirror --stay-awake
+  phone-control wireless-pair 192.168.1.25:37123 123456
+  phone-control wireless-connect 192.168.1.25:5555
+  phone-control screenshot ~/Pictures/phone.png
+USAGE
+}
+
+die() {
+  printf '%s: %s\n' "$APP_NAME" "$*" >&2
+  exit 1
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"
+}
+
+need_adb() {
+  need_cmd adb
+}
+
+need_scrcpy() {
+  need_cmd scrcpy
+}
+
+require_device() {
+  need_adb
+  local count
+  count="$(adb devices | awk 'NR > 1 && $2 == "device" { count++ } END { print count + 0 }')"
+  if [ "$count" -eq 0 ]; then
+    die "no authorized Android device found. Enable USB debugging, connect USB, and accept the phone prompt."
+  fi
+}
+
+keycode() {
+  case "${1,,}" in
+    home) printf 'KEYCODE_HOME\n' ;;
+    back) printf 'KEYCODE_BACK\n' ;;
+    recent|recents|overview) printf 'KEYCODE_APP_SWITCH\n' ;;
+    power) printf 'KEYCODE_POWER\n' ;;
+    volume-up|vol-up) printf 'KEYCODE_VOLUME_UP\n' ;;
+    volume-down|vol-down) printf 'KEYCODE_VOLUME_DOWN\n' ;;
+    enter) printf 'KEYCODE_ENTER\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+doctor() {
+  local failed=0
+
+  if command -v adb >/dev/null 2>&1; then
+    printf 'adb: %s\n' "$(command -v adb)"
+  else
+    printf 'adb: missing\n'
+    failed=1
+  fi
+
+  if command -v scrcpy >/dev/null 2>&1; then
+    printf 'scrcpy: %s\n' "$(command -v scrcpy)"
+  else
+    printf 'scrcpy: missing\n'
+    failed=1
+  fi
+
+  if command -v adb >/dev/null 2>&1; then
+    printf '\nConnected devices:\n'
+    adb devices
+  fi
+
+  if [ "$failed" -ne 0 ]; then
+    cat <<'MSG'
+
+Install dependencies on Ubuntu:
+  sudo apt update
+  sudo apt install android-tools-adb scrcpy
+MSG
+    exit 1
+  fi
+}
+
+mirror() {
+  need_scrcpy
+  require_device
+
+  local args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-audio) args+=(--no-audio) ;;
+      --stay-awake) args+=(--stay-awake) ;;
+      --turn-screen-off) args+=(--turn-screen-off) ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown mirror option: $1" ;;
+    esac
+    shift
+  done
+
+  exec scrcpy "${args[@]}"
+}
+
+screenshot() {
+  require_device
+  local out="${1:-phone-screenshot-$(date +%Y%m%d-%H%M%S).png}"
+  adb exec-out screencap -p > "$out"
+  printf 'saved screenshot: %s\n' "$out"
+}
+
+record() {
+  require_device
+  local out="${1:-phone-recording-$(date +%Y%m%d-%H%M%S).mp4}"
+  printf 'Recording. Press Ctrl+C to stop.\n'
+  scrcpy --record "$out"
+}
+
+apps() {
+  require_device
+  adb shell pm list packages | sed 's/^package://'
+}
+
+open_app() {
+  require_device
+  [ "$#" -eq 1 ] || die "usage: phone-control open PACKAGE"
+  adb shell monkey -p "$1" -c android.intent.category.LAUNCHER 1
+}
+
+run_key() {
+  require_device
+  [ "$#" -eq 1 ] || die "usage: phone-control key KEYCODE_OR_NAME"
+  adb shell input keyevent "$(keycode "$1")"
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    -h|--help|"") usage ;;
+    doctor) shift; doctor "$@" ;;
+    devices) shift; need_adb; adb devices -l "$@" ;;
+    mirror) shift; mirror "$@" ;;
+    wireless-pair)
+      shift
+      need_adb
+      [ "$#" -eq 2 ] || die "usage: phone-control wireless-pair HOST:PAIR_PORT PAIR_CODE"
+      adb pair "$1" "$2"
+      ;;
+    wireless-connect)
+      shift
+      need_adb
+      [ "$#" -eq 1 ] || die "usage: phone-control wireless-connect HOST:ADB_PORT"
+      adb connect "$1"
+      ;;
+    screenshot) shift; screenshot "$@" ;;
+    record) shift; record "$@" ;;
+    install)
+      shift
+      require_device
+      [ "$#" -eq 1 ] || die "usage: phone-control install APK"
+      adb install "$1"
+      ;;
+    push)
+      shift
+      require_device
+      [ "$#" -eq 2 ] || die "usage: phone-control push SRC PHONE_DEST"
+      adb push "$1" "$2"
+      ;;
+    pull)
+      shift
+      require_device
+      [ "$#" -eq 2 ] || die "usage: phone-control pull PHONE_SRC DEST"
+      adb pull "$1" "$2"
+      ;;
+    apps) shift; apps "$@" ;;
+    open) shift; open_app "$@" ;;
+    key) shift; run_key "$@" ;;
+    shell)
+      shift
+      require_device
+      [ "${1:-}" = "--" ] && shift
+      adb shell "$@"
+      ;;
+    *) die "unknown command: $cmd" ;;
+  esac
+}
+
+main "$@"

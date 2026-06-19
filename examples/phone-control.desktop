@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Phone Control
+Comment=Mirror and control Android phone with scrcpy
+Exec=phone-control mirror --stay-awake
+Terminal=false
+Categories=Utility;
