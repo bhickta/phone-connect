@@ -151,7 +151,7 @@ wireless_pair_qr() {
   need_cmd qrencode
 
   local service_name password payload endpoint host connect_endpoint
-  local deadline
+  local deadline pair_output pair_status
   service_name="studio-$(random_hex 5)"
   password="$(random_hex 8)"
   payload="WIFI:T:ADB;S:${service_name};P:${password};;"
@@ -172,7 +172,15 @@ wireless_pair_qr() {
   [ -n "$endpoint" ] || die "QR pairing timed out. Confirm both devices are on the same Wi-Fi and client isolation is disabled."
 
   printf 'Pairing with %s...\n' "$endpoint"
-  adb pair "$endpoint" "$password"
+  if pair_output="$(adb pair "$endpoint" "$password" 2>&1)"; then
+    pair_status=0
+  else
+    pair_status=$?
+  fi
+  printf '%s\n' "$pair_output"
+  if [ "$pair_status" -ne 0 ] || ! grep -q '^Successfully paired' <<< "$pair_output"; then
+    die "the phone was discovered, but ADB could not reach its pairing port. Disable AP/client isolation or use another Wi-Fi network."
+  fi
 
   host="${endpoint%:*}"
   deadline=$((SECONDS + 20))
