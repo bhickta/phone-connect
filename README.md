@@ -19,7 +19,7 @@ On Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install android-tools-adb scrcpy
+sudo apt install android-tools-adb scrcpy qrencode
 ```
 
 On the phone:
@@ -55,7 +55,7 @@ Copy or clone this repository on the other Linux PC, then run:
 
 ```bash
 sudo apt update
-sudo apt install android-tools-adb scrcpy
+sudo apt install android-tools-adb scrcpy qrencode
 cd android-phone-control
 ./install.sh
 phone-control doctor
@@ -91,6 +91,20 @@ phone-control open com.android.settings
 ## Wireless Debugging
 
 Android 11+ can connect without USB after pairing.
+
+### Pair with a QR code
+
+Run:
+
+```bash
+phone-control wireless-pair-qr
+```
+
+On the phone, open `Developer options` -> `Wireless debugging` -> `Pair device with QR code`, then scan the QR displayed in the terminal. The command waits for the phone over mDNS, pairs it, and connects automatically when the connection service is discoverable.
+
+QR pairing requires `qrencode` and a Wi-Fi network that allows devices to communicate with each other and pass mDNS traffic.
+
+### Pair with a pairing code
 
 On the phone, open:
 

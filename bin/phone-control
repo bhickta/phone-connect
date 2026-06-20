@@ -18,6 +18,7 @@ Usage:
   phone-control stop SESSION_ID_OR_PID
   phone-control stop-all
   phone-control logs SESSION_ID_OR_PID
+  phone-control wireless-pair-qr
   phone-control wireless-pair HOST:PAIR_PORT PAIR_CODE
   phone-control wireless-connect HOST:ADB_PORT
   phone-control screenshot [OUT.png]
@@ -40,6 +41,7 @@ Examples:
   phone-control start-off
   phone-control sessions
   phone-control stop phone-20260619-120000
+  phone-control wireless-pair-qr
   phone-control wireless-pair 192.168.1.25:37123 123456
   phone-control wireless-connect 192.168.1.25:5555
   phone-control screenshot ~/Pictures/phone.png
@@ -86,6 +88,66 @@ need_adb() {
 
 need_scrcpy() {
   need_cmd scrcpy
+}
+
+random_hex() {
+  local bytes="$1"
+  od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n'
+}
+
+mdns_endpoint() {
+  local service_name="$1"
+  local service_type="$2"
+
+  adb mdns services 2>/dev/null | awk -v name="$service_name" -v type="$service_type" '
+    $1 == name && $2 ~ type { print $3; exit }
+  '
+}
+
+wireless_pair_qr() {
+  need_adb
+  need_cmd qrencode
+
+  local service_name password payload endpoint host connect_endpoint
+  local deadline
+  service_name="studio-$(random_hex 5)"
+  password="$(random_hex 8)"
+  payload="WIFI:T:ADB;S:${service_name};P:${password};;"
+
+  printf 'On the phone, open Wireless debugging -> Pair device with QR code.\n'
+  printf 'Scan this QR code within 120 seconds:\n\n'
+  qrencode -t ANSIUTF8 -m 2 "$payload"
+  printf '\nWaiting for the phone...\n'
+
+  deadline=$((SECONDS + 120))
+  endpoint=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    endpoint="$(mdns_endpoint "$service_name" '_adb-tls-pairing[.]_tcp')"
+    [ -n "$endpoint" ] && break
+    sleep 1
+  done
+
+  [ -n "$endpoint" ] || die "QR pairing timed out. Confirm both devices are on the same Wi-Fi and client isolation is disabled."
+
+  printf 'Pairing with %s...\n' "$endpoint"
+  adb pair "$endpoint" "$password"
+
+  host="${endpoint%:*}"
+  deadline=$((SECONDS + 20))
+  connect_endpoint=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    connect_endpoint="$(adb mdns services 2>/dev/null | awk -v host="$host" '
+      $2 ~ /_adb-tls-connect[.]_tcp/ && index($3, host ":") == 1 { print $3; exit }
+    ')"
+    [ -n "$connect_endpoint" ] && break
+    sleep 1
+  done
+
+  if [ -n "$connect_endpoint" ]; then
+    adb connect "$connect_endpoint"
+  else
+    printf 'Paired successfully. ADB did not discover the connection port; use wireless-connect with the port shown on the phone.\n'
+  fi
 }
 
 require_device() {
@@ -238,6 +300,12 @@ doctor() {
     failed=1
   fi
 
+  if command -v qrencode >/dev/null 2>&1; then
+    printf 'qrencode: %s\n' "$(command -v qrencode)"
+  else
+    printf 'qrencode: missing (required only for wireless-pair-qr)\n'
+  fi
+
   if command -v adb >/dev/null 2>&1; then
     printf '\nConnected devices:\n'
     adb devices
@@ -248,7 +316,7 @@ doctor() {
 
 Install dependencies on Ubuntu:
   sudo apt update
-  sudo apt install android-tools-adb scrcpy
+  sudo apt install android-tools-adb scrcpy qrencode
 MSG
     exit 1
   fi
@@ -455,6 +523,11 @@ main() {
     stop) shift; stop_session "$@" ;;
     stop-all) shift; stop_all_sessions "$@" ;;
     logs) shift; show_logs "$@" ;;
+    wireless-pair-qr)
+      shift
+      [ "$#" -eq 0 ] || die "usage: phone-control wireless-pair-qr"
+      wireless_pair_qr
+      ;;
     wireless-pair)
       shift
       need_adb
