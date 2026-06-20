@@ -200,15 +200,40 @@ wireless_pair_qr() {
 
 require_device() {
   need_adb
-  local count
+  local count serial state
+
+  while read -r serial state; do
+    if [ "$state" = "offline" ] && [[ "$serial" == *:* ]]; then
+      adb disconnect "$serial" >/dev/null 2>&1 || true
+    fi
+  done < <(adb devices | awk 'NR > 1 { print $1, $2 }')
+
+  if [ -n "${ANDROID_SERIAL:-}" ]; then
+    state="$(adb -s "$ANDROID_SERIAL" get-state 2>/dev/null || true)"
+    [ "$state" = "device" ] || die "selected Android device is unavailable: $ANDROID_SERIAL"
+    export ANDROID_SERIAL
+    return 0
+  fi
+
   count="$(adb devices | awk 'NR > 1 && $2 == "device" { count++ } END { print count + 0 }')"
   if [ "$count" -eq 0 ]; then
     die "no authorized Android device found. Enable USB debugging, connect USB, and accept the phone prompt."
   fi
+  if [ "$count" -gt 1 ]; then
+    adb devices -l >&2
+    die "more than one active device. Run: ANDROID_SERIAL=DEVICE_SERIAL phone-control COMMAND"
+  fi
+
+  ANDROID_SERIAL="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
+  export ANDROID_SERIAL
 }
 
 current_device() {
-  adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }'
+  if [ -n "${ANDROID_SERIAL:-}" ]; then
+    printf '%s\n' "$ANDROID_SERIAL"
+  else
+    adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }'
+  fi
 }
 
 pid_alive() {

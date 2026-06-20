@@ -190,6 +190,14 @@ If wireless connection fails:
 - Recheck the ADB port shown under Wireless debugging.
 - Pair again if the phone changed networks.
 
+If more than one active device is connected, select one explicitly:
+
+```bash
+ANDROID_SERIAL=PHONE_IP:ADB_PORT phone-control start-off
+```
+
+Stale offline wireless endpoints are removed automatically.
+
 ## Security Notes
 
 ADB gives this PC powerful access to the phone while debugging is enabled. Turn off USB debugging or wireless debugging when you are done, especially on shared networks.
