@@ -19,7 +19,7 @@ On Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install android-tools-adb scrcpy qrencode
+sudo apt install android-tools-adb scrcpy qrencode avahi-utils
 ```
 
 On the phone:
@@ -55,7 +55,7 @@ Copy or clone this repository on the other Linux PC, then run:
 
 ```bash
 sudo apt update
-sudo apt install android-tools-adb scrcpy qrencode
+sudo apt install android-tools-adb scrcpy qrencode avahi-utils
 cd android-phone-control
 ./install.sh
 phone-control doctor
@@ -102,7 +102,7 @@ phone-control wireless-pair-qr
 
 On the phone, open `Developer options` -> `Wireless debugging` -> `Pair device with QR code`, then scan the QR displayed in the terminal. The command waits for the phone over mDNS, pairs it, and connects automatically when the connection service is discoverable.
 
-QR pairing requires `qrencode` and a Wi-Fi network that allows devices to communicate with each other and pass mDNS traffic.
+QR pairing requires `qrencode` and a Wi-Fi network that allows devices to communicate with each other and pass mDNS traffic. The CLI uses ADB's mDNS discovery first and falls back to `avahi-browse` when available.
 
 ### Pair with a pairing code
 

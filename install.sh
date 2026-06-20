@@ -48,5 +48,5 @@ Make sure ${target_dir} is in PATH. Then run:
 
 Ubuntu dependencies:
   sudo apt update
-  sudo apt install android-tools-adb scrcpy qrencode
+  sudo apt install android-tools-adb scrcpy qrencode avahi-utils
 MSG
